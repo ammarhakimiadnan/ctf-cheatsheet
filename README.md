@@ -5,6 +5,7 @@ Reference notes for a boot2root + forensics CTF competition (4-5 boxes via OVPN,
 - [`01-tools-setup.md`](01-tools-setup.md) — VPN connect, workflow, installing GitHub tools on the Pwnbox, configuring Burp Suite
 - [`02-boot2root.md`](02-boot2root.md) — recon, service exploitation, web exploitation, privesc, shells/transfers, scenario patterns, step-by-step enumeration playbook, extra services, master OS-agnostic walkthrough, generic exploitation checklist templates
 - [`03-forensics.md`](03-forensics.md) — live-box forensics, given-artifact analysis, full Volatility walkthrough
+- [`04-references.md`](04-references.md) — external cheatsheets, notes repos, online tools, and forensics references
 
 To pull a copy directly onto the Pwnbox:
 ```bash
