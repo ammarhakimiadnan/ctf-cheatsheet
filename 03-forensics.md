@@ -12,6 +12,7 @@ Read it in this order on game day:
 
 ## Contents
 
+- [How to read & run these commands](#reading--running-these-commands)
 - [0. Toolkit Setup](#0-toolkit-setup-do-this-the-night-before)
   - [0. Python — pip is locked down on the Pwnbox](#0-python--pip-is-usually-locked-down-on-the-pwnbox)
   - [0a. One-shot apt base](#0a-one-shot-apt-base)
@@ -43,6 +44,39 @@ Read it in this order on game day:
 - [6. Answer-Format Discipline](#6-answer-format-discipline--common-question-patterns)
 - [7. Fast Timeline Building & Correlation](#7-fast-timeline-building--correlation)
 - [8. Unstuck — when any phase stalls](#8-unstuck--when-any-phase-stalls)
+
+---
+
+## Reading & Running These Commands
+
+Every command here has **placeholders you swap for your own values.** The rule: if a token is in `<angle brackets>`, in ALL-CAPS, or starts with `$`, **change it** — everything else is literal, type it as-is. And always read the `#` comment after a command; it says what the command does and usually which part to change.
+
+**What to swap in:**
+
+| You'll see… | Put in its place | Where that value comes from |
+| --- | --- | --- |
+| `mem.raw`, `evidence/mem.raw`, `capture.pcap`, `disk.img`, `<f>`, `<artifact>` | your artifact's real filename / path | the file they gave you |
+| `$OFF` or `<offset>` (disk commands) | the partition's **sector offset** | the `Start` column of `mmls <image>` |
+| `<pid>` | a process ID | from `vol … windows.pslist` / `pstree` |
+| `--virtaddr <addr>` | a file's virtual offset | from `vol … windows.filescan` output |
+| `<keyword>` | what you're hunting for | e.g. `flag`, `.ps1`, a username |
+| `TARGET_IP`, `<your-ip>`, `IOC`, `10.10.14.7` | the relevant IP | the brief, or something you found |
+| `/mnt/disk`, `/mnt/vm`, `out/`, `~/case/chal1` | a folder you create | run `mkdir -p <it>` first |
+| `2026-11-24..2026-11-26`, dates in filters | the incident's date window | the question's timeframe |
+| `/usr/share/wordlists/rockyou.txt` | your wordlist path | already there after setup 0i |
+
+**Where do I run each tool from?** Almost everything here is installed system-wide, so it's a **global command — run it from any folder** (best: your case folder, `cd ~/case/chal1`). You do **not** need to `cd` into a tool's directory for these. The few exceptions:
+
+| Tool | How you actually run it | `cd` into its folder? |
+| --- | --- | --- |
+| `vol` (Volatility 3, pipx install) | `vol -f <img> <plugin>` — from anywhere | no |
+| Volatility 3 (if you git-cloned it instead) | `python3 ~/tools/vol3/vol.py -f <img> <plugin>` | no — just give the full path to `vol.py` |
+| **Chainsaw / Hayabusa** | `cd ~/tools/chainsaw && ./chainsaw hunt …` | **yes** — they read their bundled rules from that folder (or pass full paths to the rules) |
+| RegRipper | `perl ~/tools/regripper/rip.pl -r <hive> -p <plugin>` | no |
+| analyzeMFT / ALEAPP / iLEAPP / prefetch.py (from source) | `python3 <path>/<script>.py …` | no — full path to the script |
+| EZ tools via dotnet | `dotnet ~/tools/ez/MFTECmd.dll …` | no |
+
+**One more:** any command that writes into `out/` (e.g. `--export-objects http,out/`) needs that folder to exist first — `mkdir -p out`. The runbook's Step 1 already creates `evidence/`, `out/` and `notes/` for you.
 
 ---
 
