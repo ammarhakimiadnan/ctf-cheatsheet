@@ -12,7 +12,7 @@ Read it in this order on game day:
 
 ## 0. Toolkit Setup (do this the night before)
 
-Pwnbox / Parrot / Ubuntu / Kali all work. Run the one-shot block, then the extras you expect to need. If egress is blocked tomorrow, everything here must already be installed — **don't leave installs for game day.**
+**The org's Pwnbox is Linux (Parrot/Ubuntu/Kali-style).** Every tool below is Linux-native or cross-platform; the handful that are classically Windows (the EZ tools, DeepBlueCLI) have Linux-native replacements mapped in **0h**. Each install line has a fallback: `apt` → `pipx`/`pip --break-system-packages` → `git clone` + run the script directly. If egress is blocked tomorrow, everything here must already be installed — **don't leave installs for game day.** The quickest safety net: run the one-shot block (0a), then 0b–0g, then verify with the loop in 0i.
 
 ### 0a. One-shot apt base
 
@@ -95,8 +95,9 @@ pipx install regipy[full]
 # Install .NET runtime, then grab the .NET6 builds (MFTECmd, PECmd, LECmd, AmcacheParser,
 # AppCompatCacheParser, EvtxECmd, SBECmd, RBCmd, RECmd):
 #   https://ericzimmerman.github.io/   (download "Get-ZimmermanTools")
-# Run on Linux with:  dotnet MFTECmd.dll -f '$MFT' --csv out/
-# Easiest: run EZ tools + Timeline Explorer on a Windows analysis VM if you have one.
+# Run on Linux with:  dotnet MFTECmd.dll -f '$MFT' --csv out/   (needs dotnet, see 0h)
+# ON THE LINUX PWNBOX, prefer the native replacements in 0h (analyzeMFT, prefetch.py,
+# rifiuti2, RegRipper...) — only bother with EZ tools if you want their CSV / Timeline Explorer.
 
 # analyzeMFT — pure-Python $MFT parser (no .NET needed)
 pipx install analyzeMFT
@@ -124,16 +125,62 @@ wget -O ~/tools/stegsolve.jar http://www.caesum.com/handbook/Stegsolve.jar   # G
 sudo apt install -y zbar-tools
 ```
 
-### 0h. Wordlists + final sanity check
+### 0h. Runtimes & Windows-only-tool fallbacks (you're on a Linux Pwnbox)
+
+Everything above is Linux-native. A few classic artifact parsers are Windows (the EZ tools, DeepBlueCLI). In order of preference: **(1)** use the Linux-native equivalent below — nothing extra to install; **(2)** run the EZ tools' cross-platform `.dll` builds via `dotnet`; **(3)** install a runtime and run the Windows tool.
+
+**Install the runtimes only if you actually need options 2/3:**
+```bash
+# Rust/cargo — only if you build evtx_dump/chainsaw/mft from source instead of grabbing release binaries
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && source ~/.cargo/env
+
+# .NET runtime — to run EZ tools:  dotnet MFTECmd.dll -f '$MFT' --csv out/
+sudo apt install -y dotnet-runtime-8.0 2>/dev/null || { \
+  wget https://dot.net/v1/dotnet-install.sh -O /tmp/dn.sh && bash /tmp/dn.sh --channel 8.0 --runtime dotnet; }
+
+# Mono — for NetworkMiner
+sudo apt install -y mono-complete
+
+# PowerShell on Linux — only if you want DeepBlueCLI
+sudo apt install -y powershell 2>/dev/null || sudo snap install powershell --classic
+```
+
+**Windows/.NET tool → Linux-native replacement (no runtime needed — prefer these):**
+
+| Windows tool | Does | Linux-native replacement | Install / run |
+| --- | --- | --- | --- |
+| MFTECmd | parse `$MFT` | `analyzeMFT.py` / `mft_dump` | `pipx install analyzeMFT` · `cargo install mft` |
+| PECmd | prefetch | `prefetch.py` | `pipx install windowsprefetch` |
+| LECmd | LNK files | `lnkparse` | `pipx install LnkParse3` |
+| JLECmd | jump lists | `LnkParse3` / manual | `pipx install LnkParse3` |
+| AppCompatCacheParser | ShimCache | RegRipper `shimcache` | `rip.pl -r SYSTEM -p shimcache` |
+| AmcacheParser | Amcache | RegRipper `amcache` / regipy | `rip.pl -r Amcache.hve -p amcache` |
+| RBCmd | Recycle Bin | `rifiuti2` | `sudo apt install -y rifiuti2` |
+| SBECmd | Shellbags | regipy shellbag plugin | `regipy-plugins UsrClass.dat` |
+| RECmd / Registry Explorer | registry | RegRipper / regipy | (see 0e) |
+| EvtxECmd | evtx → CSV | Hayabusa / `evtx_dump` | (see 0d) |
+| DeepBlueCLI | evtx quick wins | Chainsaw / Hayabusa | (see 0d) |
+| FTK Imager | image mount/preview | `ewfmount` + `guestmount` + Autopsy | (0a / 4.1) |
+| Timeline Explorer | view CSV timelines | LibreOffice Calc, `csvkit`/`qsv`, Timesketch | `sudo apt install -y libreoffice-calc csvkit` |
+
+> **Last-resort fallback (no egress, pip/apt dead):** every Linux-native tool above is a single Python/Perl/Rust program you can `git clone` and run in place — the repos are in 0b–0g. Clone them on your host beforehand and transfer over the VPN if GitHub is blocked on game day.
+
+### 0i. Wordlists + final sanity check
 
 ```bash
 # rockyou
 sudo gzip -dk /usr/share/wordlists/rockyou.txt.gz 2>/dev/null
 ls -la /usr/share/wordlists/rockyou.txt
 
-# verify the heavy hitters resolve
-for t in vol tshark mmls fls binwalk exiftool olevba steghide zsteg log2timeline.py; do
+# verify the heavy hitters resolve (any MISSING = install before game day)
+for t in vol tshark mmls fls ewfmount qemu-img guestmount binwalk exiftool \
+         olevba steghide zsteg log2timeline.py analyzeMFT.py rifiuti-vista \
+         prefetch.py lnkparse hindsight; do
   printf '%-18s ' "$t"; command -v "$t" || echo "MISSING — install before game day"
+done
+# event-log + registry tools are scripts/binaries, check by path:
+for p in ~/tools/chainsaw/chainsaw ~/tools/hayabusa/hayabusa ~/tools/regripper/rip.pl; do
+  [ -e "$p" ] && echo "ok   $p" || echo "MISSING $p"
 done
 ```
 
@@ -436,15 +483,15 @@ sudo mount -o ro,loop,offset=$((OFF*512)) "$IMG" /mnt/disk
 | Question | Where / command |
 | --- | --- |
 | Full activity timeline | `log2timeline.py out.plaso /mnt/disk && psort.py -o l2tcsv out.plaso -w timeline.csv` → open in Timeline Explorer / sort by time |
-| Programs executed (even if deleted) | **Prefetch**: `PECmd.exe -d /mnt/disk/Windows/Prefetch --csv out/` • **ShimCache**: `AppCompatCacheParser` on `SYSTEM` • **Amcache**: `AmcacheParser -f /mnt/disk/Windows/AppCompat/Programs/Amcache.hve --csv out/` |
+| Programs executed (even if deleted) | **Prefetch**: `prefetch.py -f /mnt/disk/Windows/Prefetch/*.pf` • **ShimCache**: `rip.pl -r SYSTEM -p shimcache` • **Amcache**: `rip.pl -r Amcache.hve -p amcache` _(EZ-tool alt via dotnet: `PECmd`/`AppCompatCacheParser`/`AmcacheParser`)_ |
 | Persistence | RegRipper `SOFTWARE` (Run/RunOnce), Scheduled Tasks `\Windows\System32\Tasks`, Services, Startup folder |
 | User accounts / new admin | RegRipper `SAM` → users & groups; correlate with event log 4720 |
 | USB devices plugged in | `rip.pl -r SYSTEM -p usbstor` + `SOFTWARE` → USB serials & first/last connect |
 | Recently opened files | `NTUSER.DAT` → RecentDocs, `rip.pl -r NTUSER.DAT -p recentdocs` |
 | What user typed in Run / Explorer | `NTUSER.DAT` → RunMRU, TypedPaths |
-| Deleted files | `tsk_recover`, or Recycle Bin: `RBCmd -d '/mnt/disk/$Recycle.Bin' --csv out/` |
+| Deleted files | `tsk_recover`, or Recycle Bin: `rifiuti-vista /mnt/disk/'$Recycle.Bin'/*` _(EZ alt: `RBCmd`)_ |
 | Browser history / downloads | `hindsight -i /mnt/disk/Users/<u>/AppData/Local/Google/Chrome/User\ Data/Default -o out/browser` |
-| $MFT timeline / file creation times | `MFTECmd.exe -f '/mnt/disk/$MFT' --csv out/` → look for timestomping (0-ns `$STD_INFO` vs `$FILE_NAME` mismatch) |
+| $MFT timeline / file creation times | `analyzeMFT.py -f '/mnt/disk/$MFT' -c out/mft.csv` _(EZ alt: `MFTECmd`)_ → look for timestomping (0-ns `$STD_INFO` vs `$FILE_NAME` mismatch) |
 | Credentials | `SAM`+`SYSTEM` → `secretsdump.py -sam SAM -system SYSTEM LOCAL` |
 
 **Registry hive locations on the mounted image:**
@@ -461,7 +508,7 @@ Quick full profile of any hive: `perl ~/tools/regripper/rip.pl -r <hive> -a > hi
 
 ```bash
 # Auto-extract everything first — fastest win
-mkdir -p out && networkminer capture.pcap        # GUI: files, images, creds, hosts tabs
+mkdir -p out && mono NetworkMiner.exe capture.pcap   # GUI (needs mono, 0h); or skip it and use tshark/Zeek below
 tshark -r capture.pcap --export-objects http,out/http/   # carve all HTTP transfers
 tshark -r capture.pcap --export-objects smb,out/smb/
 zeek -r capture.pcap                              # generates conn.log, dns.log, http.log, files.log
