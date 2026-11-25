@@ -233,7 +233,54 @@ Triage order: `file` + `exiftool` + `sha256sum` → pick the row → **work the 
 
 ## 4. Full Incident Walkthroughs
 
-Each one is framed as **"the question they'll ask → the command → where the answer is."** Work top-to-bottom; later steps reuse artifacts you pulled earlier.
+This is **one walkthrough that starts the moment you know what the artifact is.** Run the master flow below on every challenge, branch into the matching artifact section (4a–4h), then correlate across artifacts (4i). Each branch is framed as **"the question they'll ask → the command → where the answer is."**
+
+### 4.0 Master flow — run this for any artifact, every time
+
+```
+┌─ 1. IDENTIFY ──────────────────────────────────────────────┐
+│  file * ; exiftool <a> ; sha256sum <a>                      │
+│  → match the type against the Section 1 table               │
+└─────────────────────────────────────────────────────────────┘
+          │
+┌─ 2. READ THE QUESTIONS FIRST ──────────────────────────────┐
+│  Note what each answer must be (timestamp? hash? IP? path?) │
+│  Answer only what's asked — points are per-question.        │
+└─────────────────────────────────────────────────────────────┘
+          │
+┌─ 3. BRANCH BY ARTIFACT TYPE ───────────────────────────────┐
+│  memory → 4a   disk/Win → 4b   pcap → 4c   evtx → 4d        │
+│  Linux box → 4e   maldoc/mail → 4f   browser → 4g           │
+│  mobile → 4h   registry hive → 4b(reg)   image/audio → §2   │
+└─────────────────────────────────────────────────────────────┘
+          │
+┌─ 4. EXTRACT IOCs AS YOU GO ────────────────────────────────┐
+│  Running notes table: user, IP, domain, filename, hash,     │
+│  timestamp, command, MITRE technique.                       │
+└─────────────────────────────────────────────────────────────┘
+          │
+┌─ 5. CORRELATE (if >1 artifact) → 4i ───────────────────────┐
+│  Most incidents hand you 2-3 artifacts that reference each  │
+│  other. Build ONE timeline so the story lines up.           │
+└─────────────────────────────────────────────────────────────┘
+          │
+┌─ 6. ANSWER IN EXACT FORMAT → §6 ───────────────────────────┘
+```
+
+**Decision table — "I've confirmed the artifact is X, now what":**
+
+| Confirmed artifact | Open with | Branch |
+| --- | --- | --- |
+| Memory dump (Win/Linux) | Volatility 3 | **4a** |
+| Disk image, Windows (.E01/.vmdk/.img) | ewfmount + TSK + EZ tools | **4b** |
+| Standalone registry hive | RegRipper / regipy | **4b** (registry block) |
+| Windows event logs (.evtx) | Hayabusa / Chainsaw | **4d** |
+| Network capture (.pcap/.pcapng) | tshark / Zeek / NetworkMiner | **4c** |
+| Disk image / tarball, Linux | mount -o ro + log grep | **4e** |
+| Office doc / PDF / email | oletools / pdf-parser / headers | **4f** |
+| Browser profile / SQLite DBs | pyhindsight | **4g** |
+| Mobile backup (Android/iOS) | ALEAPP / iLEAPP | **4h** |
+| Image / audio / archive / encoded blob | binwalk / zsteg / steghide / CyberChef | **§2** |
 
 ### 4a. Windows memory dump (`mem.raw` / `.vmem` / `.dmp`)
 
@@ -461,6 +508,81 @@ extract-msg suspicious.msg            # -> .eml + attachments
 Then run every attachment back through the doc/PDF steps above, and defang + submit URLs/hashes as the questions ask.
 
 **Record IOCs as you go:** sender IP, URL/domain, dropped filename, SHA256 of each stage, MITRE technique. Section 6 covers the format.
+
+### 4g. Browser artifacts (history / downloads / cache)
+
+**Scenario:** "What did the user search, download, or visit?" — given a Chrome/Edge/Firefox profile or its SQLite DBs.
+
+```bash
+# One-shot report across all installed browsers in a profile path:
+hindsight -i "/path/to/Chrome/User Data/Default" -o out/browser
+#   -> out/browser.xlsx : history, downloads, cookies, autofill, timeline
+
+# Manual, when you only have the DB files:
+sqlite3 History "SELECT datetime(last_visit_time/1000000-11644473600,'unixepoch'), url \
+  FROM urls ORDER BY last_visit_time DESC LIMIT 50;"      # Chrome visit history
+sqlite3 History "SELECT target_path, tab_url, total_bytes FROM downloads;"   # downloads
+sqlite3 places.sqlite "SELECT datetime(last_visit_date/1000000,'unixepoch'), url \
+  FROM moz_places ORDER BY last_visit_date DESC LIMIT 50;"  # Firefox
+```
+
+| Question | Where |
+| --- | --- |
+| Sites visited + when | `urls` / `moz_places` tables (note the epoch conversion above) |
+| What they downloaded | `downloads` table → `target_path`, source `tab_url` |
+| Search terms | `keyword_search_terms` (Chrome); URL query strings |
+| Logged-in accounts | `cookies`, `Login Data` (encrypted — note the account, not the pw) |
+| Cached payload / page | cache dir → carve with `file`/`strings`, or `chromagnon`/`hindsight` |
+
+> Chrome timestamps are microseconds since **1601-01-01** (subtract 11644473600 after /1e6); Firefox is microseconds since **1970**. Get this wrong and every timestamp answer is off.
+
+### 4h. Mobile backup (Android / iOS)
+
+**Scenario:** "Here's a phone extraction / backup — recover messages, locations, app activity."
+
+```bash
+# Automated parsers turn a raw extraction into a browsable report:
+python3 aleapp.py  -t fs   -i extraction/ -o out/android     # Android (ALEAPP)
+python3 ileapp.py  -t fs   -i extraction/ -o out/ios         # iOS (iLEAPP)
+
+# Manual SQLite dives (freshest data often lives in -wal, so copy the whole set):
+sqlite3 mmssms.db "SELECT address, datetime(date/1000,'unixepoch'), body FROM sms;"   # Android SMS
+sqlite3 sms.db    "SELECT text, datetime(date/1000000000+978307200,'unixepoch') FROM message;"  # iOS iMessage
+```
+
+| Question | Where |
+| --- | --- |
+| SMS / chat messages | `mmssms.db` (Android), `sms.db` (iOS), app DBs for WhatsApp/Signal |
+| Call log | `calllog.db` / `CallHistory.storedata` |
+| Locations | `cache.sqlite`, app geodata, EXIF GPS on photos (`exiftool`) |
+| Installed/used apps | `/data/data/<pkg>/`, `shared_prefs/*.xml`, iOS `Manifest.db` |
+| Account creds / tokens | `shared_prefs`, Keychain (iOS), app DBs |
+
+> iOS timestamps are seconds since **2001-01-01** (add 978307200 to reach Unix epoch). Pull `.db`, `.db-wal`, and `.db-shm` together — the WAL holds the newest unflushed rows.
+
+### 4i. Correlate across artifacts (when you get more than one)
+
+Incidents usually hand you a **set** — e.g. a pcap + a memory dump + event logs — that describe the same attack from different angles. Build one timeline so the answers line up and you can fill gaps (the pcap gives the C2 IP, memory gives the process that opened it, evtx gives the logon that started it).
+
+```bash
+# Normalize everything into a single Plaso timeline:
+log2timeline.py case.plaso /mnt/disk          # disk/registry/evtx/browser all at once
+log2timeline.py --parsers winevtx case.plaso ./evtx/
+psort.py -o l2tcsv case.plaso -w master_timeline.csv
+# Open master_timeline.csv in Timeline Explorer (or sort/grep) and read the story in order.
+```
+
+**Pivot points that stitch artifacts together:**
+
+| You found (artifact A) | Pivot on | Confirm in (artifact B) |
+| --- | --- | --- |
+| C2 IP in `windows.netscan` | IP | pcap Conversations → what was sent |
+| Suspicious PID + cmdline (memory) | process name / time | evtx 4688 / 4104 → how it launched |
+| Logon from odd IP (evtx 4624) | source IP + time | pcap → the session; memory → resulting process |
+| Dropped filename (disk `$MFT`) | filename / hash | memory `filescan`, pcap HTTP object, maldoc payload |
+| Webshell hit (Linux access.log) | timestamp + URI | bash history / dropped files at that time |
+
+Anchor on **time + one shared IOC** (an IP, a filename, a username) and walk it through every artifact you were given.
 
 ---
 
