@@ -435,8 +435,8 @@ java -jar ~/tools/stegsolve.jar                  # GUI bit-plane viewer
 
 **Archive / carving**
 ```bash
-binwalk -e <f>; foremost -i <f> -o out/; photorec <f>
-bulk_extractor -o out/ <f>                       # carves emails, URLs, ccns, etc.
+binwalk -e <f>; foremost -i <f> -o fore_out; photorec <f>   # output dir must NOT exist yet
+bulk_extractor -o be_out <f>                     # carves emails, URLs, ccns (dir must NOT exist yet)
 zip2john <f> > hash.txt && john hash.txt          # crack zip password
 ```
 
@@ -673,25 +673,27 @@ vol -f mem.raw windows.info
 | Exact command line run | `windows.cmdline` | Full argv per PID — often the flag or the download URL |
 | PID / PPID of the malware | `windows.pslist` / `windows.psscan` | `psscan` also finds **hidden/terminated** procs |
 | Attacker C2 IP / port | `windows.netscan` | ForeignAddr + owning PID; cross-ref to the bad process |
-| Injected / hollowed code | `windows.malfind -D out/` | MZ header in `PAGE_EXECUTE_READWRITE` region = injected; dumps it |
+| Injected / hollowed code | `windows.malfind --dump` | MZ header in `PAGE_EXECUTE_READWRITE` region = injected; dumps it |
 | What command history / typed | `windows.cmdline`, `windows.consoles`, `windows.cmdscan` | `consoles` recovers full console scrollback incl. output |
 | Files the attacker touched | `windows.filescan \| grep -i <kw>` | Get the virtual offset, then dump (below) |
-| Pull a file out of memory | `windows.dumpfiles --virtaddr <offset> -o out/` | Carved file in `out/` |
-| Dump a whole process | `windows.memmap --pid <pid> --dump -o out/` | `pid.<pid>.dmp` → run `strings`/AV on it |
+| Pull a file out of memory | `windows.dumpfiles --virtaddr <offset>` | Carved file in your `-o` dir |
+| Dump a whole process | `windows.memmap --pid <pid> --dump` | `pid.<pid>.dmp` → run `strings`/AV on it |
 | Local password hashes | `windows.hashdump` / `windows.lsadump` / `windows.cachedump` | NTLM hashes → crack `-m 1000` |
 | Persistence (registry in RAM) | `windows.registry.printkey --key 'Software\Microsoft\Windows\CurrentVersion\Run'` | Auto-run values |
 | Clipboard contents | `windows.clipboard` | Sometimes holds the pasted password/flag |
 | What the user ran recently | `windows.registry.userassist` | GUI program execution counts + timestamps |
+
+> **Dumping with vol3 — flag order matters:** `-o` (output dir) is a *global* option, so it goes **before** the plugin name: `vol -f mem.raw -o out/ windows.dumpfiles --virtaddr <addr>` (same for `windows.malfind --dump` and `windows.memmap --pid <pid> --dump`). Put `-o out/` *after* the plugin and vol3 errors with *unrecognized arguments*. Create `out/` first (`mkdir -p out`).
 
 **Pull-it-together recipe:**
 ```bash
 vol -f mem.raw windows.pstree          > out/pstree.txt   # find the odd process + its PID
 vol -f mem.raw windows.cmdline         > out/cmdline.txt  # read its exact command line
 vol -f mem.raw windows.netscan         > out/net.txt      # map that PID to a C2 address
-vol -f mem.raw windows.malfind -D out/                     # dump injected regions
+vol -f mem.raw -o out/ windows.malfind --dump             # dump injected regions (-o BEFORE plugin)
 vol -f mem.raw windows.consoles        > out/consoles.txt # recover shell scrollback
 vol -f mem.raw windows.filescan | grep -iE 'flag|\.ps1|\.exe|\.zip|desktop' > out/files.txt
-vol -f mem.raw windows.dumpfiles --virtaddr <offset> -o out/
+vol -f mem.raw -o out/ windows.dumpfiles --virtaddr <offset>
 strings out/*.dmp | grep -iE 'flag\{|http|password'
 ```
 
@@ -993,8 +995,8 @@ vol -f mem.raw windows.hashdump     # local account hashes, if SAM/SYSTEM reside
 **Step 4 — pull artifacts referenced by what you found**
 ```bash
 vol -f mem.raw windows.filescan | grep -i <keyword>
-vol -f mem.raw windows.dumpfiles --virtaddr <addr> -o out/
-vol -f mem.raw windows.memmap --pid <pid> --dump -o out/
+vol -f mem.raw -o out/ windows.dumpfiles --virtaddr <addr>    # -o BEFORE the plugin
+vol -f mem.raw -o out/ windows.memmap --pid <pid> --dump
 ```
 
 **Step 5 — registry / console / extras**
