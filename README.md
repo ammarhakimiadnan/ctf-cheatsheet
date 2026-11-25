@@ -10,5 +10,5 @@ Reference notes for a boot2root + forensics CTF competition (4-5 boxes via OVPN,
 
 To pull a copy directly onto the Pwnbox:
 ```bash
-curl -O https://raw.githubusercontent.com/ammarhakimiadnan/ctf-cheatsheet/main/02-boot2root.md
+curl -O https://raw.githubusercontent.com/ammarhakimiadnan/ctf-cheatsheet
 ```
