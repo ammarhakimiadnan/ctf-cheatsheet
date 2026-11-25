@@ -152,6 +152,11 @@ sudo gem install zsteg                    # LSB stego in PNG/BMP
 wget -O ~/tools/stegsolve.jar http://www.caesum.com/handbook/Stegsolve.jar   # GUI bitplanes
 # zbarimg for QR/barcodes:
 sudo apt install -y zbar-tools
+
+# audio / image / video forensics + crypto helpers
+sudo apt install -y sox audacity multimon-ng ffmpeg imagemagick
+pipx install xortool            # XOR key-length/key finder
+pipx install stego-lsb          # LSB stego in WAV/PNG  (or: git clone + python3)
 ```
 
 ### 0h. Runtimes & Windows-only-tool fallbacks (you're on a Linux Pwnbox)
@@ -285,6 +290,60 @@ echo '<hex>' | xxd -r -p
 # CyberChef "Magic" wand auto-detects encoding chains (base64/32/58/85, hex, ROT, XOR, gzip)
 ```
 A long base64-looking blob inside a pcap / memdump / image is very often the flag, double- or triple-encoded.
+
+**Audio forensics** (WAV/MP3/FLAC — a whole CTF category)
+```bash
+exiftool a.wav; strings a.wav | grep -i flag
+sox a.wav -n spectrogram -o spec.png     # LOOK at the spectrogram — flags/text hidden here
+audacity a.wav                           # GUI: Spectrogram view, split stereo, reverse, slow down
+# common tricks to check:
+#  - text drawn in the SPECTROGRAM (most common)
+#  - Morse code (listen / read the waveform:  -.-.  )
+#  - DTMF phone tones -> decode:  multimon-ng -a DTMF -t wav a.wav
+#  - data in ONE stereo channel, or L-R difference
+#  - reversed / slowed / sped-up audio
+#  - LSB stego in samples:  check with WavSteg / stego-lsb
+multimon-ng -a DTMF -a MORSE_CW -t wav a.wav
+```
+
+**Image / video deep checks** (beyond §stego above)
+```bash
+exiftool -gps:all -a img.jpg             # GPS coords -> geolocation answers
+convert img.jpg -auto-level out.png      # ImageMagick: pull faint detail
+ffmpeg -i clip.mp4 frames/%04d.png       # split video to frames, then scan each
+ffmpeg -i clip.mp4 -vn audio.wav         # rip the audio track -> audio forensics above
+zbarimg img.png                          # decode QR / barcodes in an image
+# a GIF: split frames, a frame may hold the flag:  convert anim.gif frame_%03d.png
+```
+
+**Encoding & classical crypto** (when `file` says `data` / you have a short blob)
+```bash
+# Try, in order: base64 -> base32 -> hex -> ROT/Caesar -> XOR -> gzip/zlib
+echo '<s>' | base64 -d ; echo '<s>' | base32 -d ; echo '<s>' | xxd -r -p
+# CyberChef "Magic" auto-detects the chain; feed it the blob first.
+# Classical ciphers (quipqiup.com for substitution, dcode.fr for everything):
+#   Caesar/ROT, Vigenère, XOR (single/multi-byte), Atbash, rail-fence,
+#   Base58/85, morse, binary, baudot, brainfuck, substitution.
+xortool blob.bin                         # find XOR key length + key
+```
+
+**File repair / format triage** (broken or disguised files)
+```bash
+file f; xxd f | head                     # does the magic match the extension?
+#   fix a wrong header by editing magic bytes:  PNG=89504E47  JPG=FFD8FF  PDF=25504446
+#   GZIP=1F8B  ZIP/Office/JAR=504B0304  PK  ELF=7F454C46  RAR=526172
+binwalk -e f                             # pull embedded files out of a container
+pngcheck -v f; zip -FF broken.zip --out fixed.zip   # repair truncated zip
+```
+
+**OSINT / geolocation** (an image/doc is the artifact, the answer is "where/who/when")
+```bash
+exiftool -a -G1 artifact                 # author, software, serial, GPS, timestamps
+#  - GPS -> paste lat,long into a map
+#  - reverse image search (Google/Yandex/TinEye) for location/source
+#  - landmarks, signage, license plates, sun angle -> narrow the place
+#  - document author/company + revision history (docProps/core.xml)
+```
 
 ---
 
