@@ -76,6 +76,33 @@ Every command here has **placeholders you swap for your own values.** The rule: 
 | analyzeMFT / ALEAPP / iLEAPP / prefetch.py (from source) | `python3 <path>/<script>.py …` | no — full path to the script |
 | EZ tools via dotnet | `dotnet ~/tools/ez/MFTECmd.dll …` | no |
 
+**The exceptions as full, runnable commands** (copy, then swap the filenames for yours):
+```bash
+# Volatility 3 (pipx install) — global; run it from your case folder
+vol -f evidence/mem.raw windows.pstree
+
+# Volatility 3 (if you git-cloned it instead) — identical, just the full path to vol.py
+python3 ~/tools/vol3/vol.py -f evidence/mem.raw windows.pstree
+
+# Chainsaw — you cd IN, so point at evidence + output with FULL paths
+cd ~/tools/chainsaw
+./chainsaw hunt ~/case/chal1/evidence/evtx/ -s sigma/ --mapping mappings/sigma-event-logs-all.yml -r rules/ --csv ~/case/chal1/out/
+
+# Hayabusa — same idea: cd in, use full paths
+cd ~/tools/hayabusa
+./hayabusa csv-timeline -d ~/case/chal1/evidence/evtx/ -o ~/case/chal1/out/timeline.csv
+
+# RegRipper — run from anywhere; -r is the hive file, -p is the plugin
+perl ~/tools/regripper/rip.pl -r evidence/SYSTEM -p shimcache > out/shimcache.txt
+
+# A from-source Python tool (ALEAPP / iLEAPP / analyzeMFT) — full path to the .py
+python3 ~/tools/aleapp/aleapp.py -t fs -i evidence/extraction/ -o out/android
+
+# EZ tool via dotnet — full path to the .dll
+dotnet ~/tools/ez/MFTECmd.dll -f 'evidence/$MFT' --csv out/
+```
+> After you `cd` into Chainsaw/Hayabusa's folder you've **left your case folder**, so give the artifact and the output as full paths (`~/case/chal1/…`), not `evidence/…` — otherwise the tool looks for them inside its own directory.
+
 **One more:** any command that writes into `out/` (e.g. `--export-objects http,out/`) needs that folder to exist first — `mkdir -p out`. The runbook's Step 1 already creates `evidence/`, `out/` and `notes/` for you.
 
 ---
