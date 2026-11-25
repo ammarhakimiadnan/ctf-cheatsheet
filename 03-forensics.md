@@ -281,6 +281,88 @@ This is **one walkthrough that starts the moment you know what the artifact is.*
 | Browser profile / SQLite DBs | pyhindsight | **4g** |
 | Mobile backup (Android/iOS) | ALEAPP / iLEAPP | **4h** |
 | Image / audio / archive / encoded blob | binwalk / zsteg / steghide / CyberChef | **§2** |
+| Forensic image / VM container (.E01, .vmdk, .vdi, .vhdx, .qcow2, .ova, .vmem…) | convert/mount first | **4.1** |
+
+> If `mmls`/`vol` errors with "cannot determine format", you've been handed a **container**, not a raw image — go to 4.1, convert or mount it to a raw/analyzable form, then come back to the right branch.
+
+### 4.1 Containers, forensic images & VM files — get to a mountable form first
+
+You rarely get a clean `.raw`. Most challenges hand you a forensic-image or VM container. **Identify it, then expose it as a raw image (or mount it read-only), then run 4a/4b/4e on the result.**
+
+**Install the format tools (add to Section 0):**
+```bash
+sudo apt install -y ewf-tools afflib-tools libvmdk-utils libvhdi-utils \
+                    libvslvm-utils qemu-utils libguestfs-tools nbd-client
+```
+
+**Always identify the container first:**
+```bash
+file image.*                     # first guess
+qemu-img info disk.vmdk          # VM disks: real format, virtual size, backing file
+ewfinfo image.E01                # EWF/EnCase metadata (acquiry info, hashes)
+mmls disk.img                    # if THIS works, it's already raw -> go straight to 4b/4e
+```
+
+#### Disk / forensic-image formats
+
+| Format (ext) | Expose it as raw / mount read-only |
+| --- | --- |
+| **raw / dd** (`.img .raw .dd .001`) | already raw — `mmls disk.img` directly |
+| **EWF / EnCase** (`.E01 .Ex01 .s01`) | `ewfmount img.E01 /mnt/ewf` → `/mnt/ewf/ewf1` (raw). Or convert: `ewfexport -t out img.E01` |
+| **AFF** (`.aff`) | `affuse img.aff /mnt/aff` → `/mnt/aff/img.aff.raw` |
+| **VMDK** (VMware) | `qemu-img convert -O raw disk.vmdk disk.raw`  •or•  `vmdkmount disk.vmdk /mnt/vmdk` |
+| **VDI** (VirtualBox) | `qemu-img convert -O raw disk.vdi disk.raw` |
+| **VHD / VHDX** (Hyper-V) | `qemu-img convert -O raw disk.vhdx disk.raw`  •or•  `vhdimount disk.vhdx /mnt/vhd` |
+| **QCOW2** (QEMU/KVM) | `qemu-img convert -O raw disk.qcow2 disk.raw` |
+| **OVA** (`.ova`) | it's a tar: `tar xvf vm.ova` → yields `.ovf` + `.vmdk`(s), then handle the vmdk above |
+| **OVF** (`.ovf`) | XML descriptor; the real disks are the `.vmdk`/`.vhd` files beside it |
+
+**Universal method A — qemu-nbd (any VM disk, no conversion/space needed):**
+```bash
+sudo modprobe nbd max_part=16
+sudo qemu-nbd -r -c /dev/nbd0 disk.vmdk      # -r = read-only; works for vmdk/vdi/vhdx/qcow2
+sudo partprobe /dev/nbd0
+mmls /dev/nbd0                                 # partition table
+sudo mount -o ro /dev/nbd0p2 /mnt/vm          # mount the data partition
+# ...analyze under /mnt/vm...
+sudo umount /mnt/vm && sudo qemu-nbd -d /dev/nbd0   # clean up
+```
+
+**Universal method B — libguestfs (auto-detects format AND partitions):**
+```bash
+virt-filesystems -a disk.vmdk --long -h       # list partitions/filesystems first
+guestmount -a disk.vmdk -i --ro /mnt/vm       # -i inspects + mounts the OS automatically
+#   specific partition:  guestmount -a disk.img -m /dev/sda1 --ro /mnt/vm
+guestfish --ro -a disk.vmdk -i                 # interactive shell when you just need a few files
+```
+
+**TSK directly on a container** (if built with the libs — skips conversion):
+```bash
+mmls -i ewf img.E01            # EWF
+mmls -i vmdk disk.vmdk         # VMDK
+fls  -i vmdk -r -o <off> disk.vmdk
+```
+
+Once you have the raw image or a mounted filesystem → **Windows disk = 4b, Linux disk = 4e.**
+
+#### VM memory / saved-state files → Volatility
+
+| File (ext) | How to feed Volatility |
+| --- | --- |
+| **VMware RAM** (`.vmem`) | raw physical memory — `vol -f vm.vmem windows.info` directly (keep the `.vmsn`/`.vmss` beside it for metadata) |
+| **VMware snapshot/suspend** (`.vmsn .vmss`) | convert with VMware's `vmss2core -W vm.vmss vm.vmem`, then run vol on the `.vmem` |
+| **VirtualBox saved state** | `VBoxManage debugvm "<vm>" dumpvmcore --filename mem.elf` → `vol -f mem.elf linux.pslist` (ELF core) |
+| **Windows crash dump** (`.dmp`) | vol reads it directly: `vol -f memory.dmp windows.info` |
+| **Hibernation** (`hiberfil.sys`) | convert with `hibr2bin hiberfil.sys mem.raw` (Comae), then run vol on `mem.raw` |
+| **Pagefile** (`pagefile.sys`) | supplementary — carve with `bulk_extractor`/`strings`, correlate with the memory dump |
+
+> If you get a **whole VM folder**, the `.vmdk` is the disk (→ 4.1 disk method) and the `.vmem`/`.vmss` is the RAM (→ 4a). You can often answer the same question from either — pick whichever the question points at.
+
+#### Other containers you might be handed
+
+- **Triage collections** (KAPE / Velociraptor output, a `.zip`/`.tar.gz` of pulled artifacts): just extract and feed each file to its parser (evtx→4d, hives→4b, browser DBs→4g). No mounting needed.
+- **LVM / BitLocker / LUKS volumes:** after exposing the disk, `vgscan && vgchange -ay` for LVM; `dislocker` for BitLocker; `cryptsetup open` for LUKS — then mount the inner filesystem.
+- **Single files pulled from a case** (a lone registry hive, one evtx, a SQLite DB): skip all of the above and go straight to the matching branch.
 
 ### 4a. Windows memory dump (`mem.raw` / `.vmem` / `.dmp`)
 
