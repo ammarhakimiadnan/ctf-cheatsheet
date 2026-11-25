@@ -44,6 +44,7 @@ Read it in this order on game day:
 - [6. Answer-Format Discipline](#6-answer-format-discipline--common-question-patterns)
 - [7. Fast Timeline Building & Correlation](#7-fast-timeline-building--correlation)
 - [8. Unstuck — when any phase stalls](#8-unstuck--when-any-phase-stalls)
+- [9. Checking which CVE produced the evidence](#9-checking-which-cve-produced-the-evidence)
 
 ---
 
@@ -102,6 +103,8 @@ python3 ~/tools/aleapp/aleapp.py -t fs -i evidence/extraction/ -o out/android
 dotnet ~/tools/ez/MFTECmd.dll -f 'evidence/$MFT' --csv out/
 ```
 > After you `cd` into Chainsaw/Hayabusa's folder you've **left your case folder**, so give the artifact and the output as full paths (`~/case/chal1/…`), not `evidence/…` — otherwise the tool looks for them inside its own directory.
+
+> **The evidence does NOT need to sit in the tool's folder.** Volatility, tshark, oletools, etc. all take the file as a *path* argument (`vol -f evidence/mem.raw …`, `tshark -r evidence/cap.pcap …`), so keep every artifact in your one `~/case/chal1/evidence/` folder and point tools at it from there. The *only* time you need full paths is the Chainsaw/Hayabusa `cd` case just above.
 
 **One more:** any command that writes into `out/` (e.g. `--export-objects http,out/`) needs that folder to exist first — `mkdir -p out`. The runbook's Step 1 already creates `evidence/`, `out/` and `notes/` for you.
 
@@ -1122,5 +1125,37 @@ bulk_extractor -o be_out <artifact>   # carves emails, URLs, IPs, card numbers, 
 exiftool -a -G1 <artifact>            # metadata you skipped
 # then: CyberChef Magic on any blob · aperisolve on any image · searchsploit/trickest on any version
 ```
+
+---
+
+## 9. Checking Which CVE Produced the Evidence
+
+When a question asks "which vulnerability / CVE was used," you work **backwards from the evidence.** Five steps:
+
+**1. Pull the service + version that got hit** — from the evidence, not from memory:
+```bash
+# web logs / pcap: the server banner or Server: header tells you the exact product + version
+grep -aoiE 'Server: [^\r]+' evidence/access.log | sort -u
+tshark -r evidence/cap.pcap -Y 'http.response' -T fields -e http.server | sort -u
+# memory/disk: the running service binary and its version (e.g. from cmdline / file version)
+```
+
+**2. Grab the attack payload or URI** and match it to a known signature → [05 §4 payload signatures](05-cve-poc-forensics.md#4-payload-signatures-youll-literally-see-in-the-evidence). E.g. `${jndi:` = Log4Shell, `() { :;};` = Shellshock, `human2.aspx` = MOVEit.
+```bash
+grep -aoiE '\$\{jndi:|\(\) \{ :;\};|/cgi-bin/|\.\./|rO0AB|__VIEWSTATE' evidence/access.log
+```
+
+**3. Look it up** (works offline after you cloned the CVE repos in [05 §1](05-cve-poc-forensics.md#1-instant-poc-lookup-for-any-cve-clone-these-tonight)):
+```bash
+searchsploit apache 2.4.49          # by product + version
+searchsploit --cve 2021-41773       # if you already suspect a CVE id
+grep -rl "2.4.49" ~/cve/trickest/   # browse the local trickest clone
+```
+
+**4. Confirm by correlating** (see [§4i](#4i-correlate-across-artifacts-when-you-get-more-than-one) / [§7](#7-fast-timeline-building--correlation)): the exploited service → the process it spawned → the outbound connection, all at the **same timestamp**. If they line up, that's your CVE.
+
+**5. Answer** as `CVE-YYYY-NNNNN` (and the MITRE `T####` if asked) — format per [§6](#6-answer-format-discipline--common-question-patterns).
+
+> The full CVE → forensic-indicator → PoC map lives in **[05-cve-poc-forensics.md](05-cve-poc-forensics.md)** — keep it open alongside this tab.
 
 > **Workflow:** read the full question list first, pick the one artifact + tool each question needs, and answer only what's asked. Don't try to fully reverse the whole image — points are per-question.
