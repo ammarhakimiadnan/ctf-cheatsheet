@@ -41,6 +41,8 @@ Read it in this order on game day:
   - [4i. Correlate across artifacts](#4i-correlate-across-artifacts-when-you-get-more-than-one)
 - [5. Volatility Deep-Dive](#5-volatility-deep-dive-memory-analysis-reference)
 - [6. Answer-Format Discipline](#6-answer-format-discipline--common-question-patterns)
+- [7. Fast Timeline Building & Correlation](#7-fast-timeline-building--correlation)
+- [8. Unstuck — when any phase stalls](#8-unstuck--when-any-phase-stalls)
 
 ---
 
@@ -81,7 +83,8 @@ sudo apt update && sudo apt install -y \
   python3-pip python3-venv pipx git curl wget unzip p7zip-full \
   sleuthkit autopsy ewf-tools libewf-dev \
   wireshark tshark tcpdump \
-  binwalk foremost bulk-extractor scalpel \
+  binwalk foremost bulk-extractor scalpel testdisk \
+  john \
   libimage-exiftool-perl ssdeep \
   steghide outguess pngcheck \
   pdfid pdf-parser qpdf poppler-utils \
@@ -750,6 +753,8 @@ evtx_dump Security.evtx | less                               # raw XML when you 
 
 **Attack reconstruction order:** 4625 (how they got the creds) → 4624 Type 3/10 (first successful logon + source IP) → 4688/4104 (what they ran) → 7045/4698/4720 (persistence they planted) → 1102 (did they cover tracks). Note the **first** and **last** timestamps — questions love "initial compromise time" and "how long were they in."
 
+> **If you see a Sysmon log** (`Microsoft-Windows-Sysmon/Operational`) — start there, it's far richer than Security: **1** process create (with SHA/MD5 hash + full cmdline + parent), **3** network connection, **7** image/DLL load, **8** CreateRemoteThread (injection), **10** process access, **11** file create, **12/13/14** registry, **15** file stream (download mark-of-the-web), **22** DNS query, **23/26** file delete. One Sysmon EID 1 line often answers "what ran / its hash / its parent" in one go.
+
 ### 4e. Linux server compromise (disk image / triage tarball)
 
 **Scenario:** "This Linux web server was popped. Find the webshell, the entry point, and persistence."
@@ -891,6 +896,8 @@ psort.py -o l2tcsv case.plaso -w master_timeline.csv
 
 Anchor on **time + one shared IOC** (an IP, a filename, a username) and walk it through every artifact you were given.
 
+> ⚡ **For the fast way to actually build and slice these timelines — see [§7](#7-fast-timeline-building--correlation).** Don't run full Plaso on a whole disk mid-event; it can take hours.
+
 ---
 
 ## 5. Volatility Deep-Dive (memory analysis reference)
@@ -963,5 +970,96 @@ Correct findings get marked wrong on format. Before submitting, match the format
 | "Did they cover tracks?" | event 1102, cleared `.bash_history`, timestomped `$MFT` |
 | "What's in the macro/payload?" | `olevba` / `pdf-parser` → decode the base64/URL |
 | "Hidden data in this image?" | `zsteg -a` / `steghide` / `binwalk -e` |
+
+---
+
+## 7. Fast Timeline Building & Correlation
+
+Full `log2timeline` on a whole disk can take **hours** — too slow mid-event. Build only what the question needs, slice to the incident window, and correlate on one pivot. In order of speed:
+
+### 7a. Filesystem timeline in seconds (Sleuth Kit `mactime`)
+```bash
+# raw image at partition offset $OFF (mmls to find it); .E01 -> ewfmount first
+fls -r -m "C:/" -o $OFF disk.img > bodyfile              # Linux image: fls -r -m / -o $OFF
+mactime -b bodyfile -d -z UTC > fs_timeline.csv           # full, CSV, sortable
+mactime -b bodyfile -d -z UTC 2026-11-24..2026-11-26 > window.csv   # just the incident window
+```
+The single biggest speedup — pure file MACB times, no registry/log parsing. Pull `$MFT` detail later only if a question needs it (`analyzeMFT.py`).
+
+### 7b. Event-log timeline in seconds (Hayabusa)
+```bash
+hayabusa csv-timeline -d ./evtx/ -o out/evtx_tl.csv -p verbose     # fast, with detections built in
+```
+
+### 7c. Full super-timeline, but faster (targeted Plaso + window slice)
+Only when you genuinely need FS + registry + evtx + browser in one view:
+```bash
+# parse ONLY useful sources, not every parser (this is the big win):
+log2timeline.py --parsers 'mft,usnjrnl,winevtx,winreg,prefetch,webhist,lnk,olecf' \
+                case.plaso /mnt/disk
+# slice to the window at OUTPUT time so it's fast to read:
+psort.py -o l2tcsv case.plaso \
+  "date > '2026-11-24 00:00:00' AND date < '2026-11-26 00:00:00'" -w window.csv
+```
+`--parsers` + a date filter turn a multi-hour run into minutes. `-o dynamic` gives a cleaner column set if you prefer.
+
+### 7d. Correlate FAST — one pivot, one window, one grep
+You rarely need a merged super-timeline to answer a single question. Faster:
+1. **Find the pivot once** — the first bad logon / odd process / exploit request — and note its **UTC time** + one **IOC** (IP, filename, user).
+2. **Grep every artifact** to a ±5-min window around it, or grep that one IOC across everything:
+```bash
+IOC='10.10.14.7'                 # or a filename / username
+grep -rIn "$IOC" out/ /mnt/disk/var/log/ bodyfile out/evtx_tl.csv   # one IOC, every source
+awk -F',' '$1>="2026-11-24 14:30" && $1<="2026-11-24 14:40"' window.csv   # the time window
+```
+
+### 7e. Merge different sources into ONE sortable stream
+When you do need everything side by side, normalize each to `UTC<TAB>SOURCE<TAB>detail`, concat, sort:
+```bash
+# pcap
+tshark -r cap.pcap -t ad -T fields -e frame.time_utc -e ip.src -e ip.dst -e _ws.col.Info \
+  | awk -F'\t' '{print $1"\tPCAP\t"$2" -> "$3"  "$4}'          >> merged.tsv
+# filesystem (bodyfile from 7a)
+mactime -b bodyfile -d -z UTC | awk -F',' 'NR>1{print $1"\tFS\t"$8}'   >> merged.tsv
+# evtx (hayabusa csv: first col is the timestamp)
+awk -F',' 'NR>1{print $1"\tEVTX\t"$0}' out/evtx_tl.csv           >> merged.tsv
+sort merged.tsv | less            # the whole incident, one stream, in order
+```
+
+### 7f. Visual correlation (if available)
+- **Timesketch** — import a `.plaso` file, then tag/search/share a timeline across all sources (best for big multi-artifact cases).
+- **Timeline Explorer** (Windows) / LibreOffice Calc / `csvkit` `csvgrep` — filter the CSV by time or keyword.
+
+> **Time zones are the #1 correlation bug.** Force everything to **UTC** (`-z UTC`, `tshark -t ad`, Plaso defaults to UTC) before comparing — a pcap in local time next to evtx in UTC makes events look hours apart and the story won't line up.
+
+---
+
+## 8. Unstuck — when any phase stalls
+
+Don't burn 30 minutes on one wall. Find your phase, try the move; if it still won't give → **skip, bank the answers you have, come back.** Points are per-question.
+
+| Stuck at… | The move |
+| --- | --- |
+| **`file` says `data`, can't ID it** | `binwalk <f>` + `xxd <f> \| head` (magic bytes); try it as each type: `mmls` (disk), `vol -f <f> windows.info` (memory), `7z l` (archive); high entropy all through → encrypted/compressed, hunt the password/key in other artifacts |
+| **Container won't mount ([4.1](#41-containers-forensic-images--vm-files--get-to-a-mountable-form-first))** | switch method: `qemu-nbd` ↔ `guestmount` ↔ `ewfmount`/`affuse`; `qemu-img info` for format + backing file; filesystem corrupt → `testdisk` to rebuild the partition table, or `photorec`/`tsk_recover` to carve files out |
+| **`vol windows.info` fails** | wrong layer/tool: is it a **hiberfil** (`hibr2bin`) or a **disk**, not RAM? try **Volatility 2** + a profile for old dumps; last resort `strings -el mem.raw \| grep` + `bulk_extractor` |
+| **Linux memory, no symbols** | build an ISF: `dwarf2json linux --elf vmlinux > kernel.json` → drop in `volatility3/symbols/linux/`; can't? fall back to `strings`/`bulk_extractor`/`photorec` and grep for bash history, configs, keys |
+| **pcap: nothing obvious / all TLS** | no keys → pivot to metadata: TLS **SNI**, cert **CN**, **JA3**, **DNS** names, packet **size/timing** (beacon); check non-HTTP protocols; `zeek -r f.pcap` then read `conn.log`/`dns.log`/`ssl.log`; NetworkMiner for auto-carved creds/files |
+| **evtx: logs cleared / missing** | the **1102 clear** is often itself the answer; pivot to **Sysmon/Operational**, **PowerShell/Operational (4104)**, `$MFT`/prefetch for execution, or the pcap — one source covering tracks rarely covers all |
+| **Encoded blob won't decode** | CyberChef **Magic** (tick *Intensive mode*); `xortool` if it's XOR; `file` it after each decode (it may become a real file → `binwalk`); classical cipher → **dcode.fr** / quipqiup |
+| **Stego: found nothing** | wrong layer — run **all**: `zsteg -a`, `steghide extract` (password = challenge title/words), `stegseek rockyou`, `exiftool`, `binwalk -e`, declared-vs-real dimensions, each plane in Stegsolve; audio → **spectrogram**; or **aperisolve.com** (runs them all at once) |
+| **Artifact is password-protected** | crack it: `zip2john`/`office2john`/`pdf2john <f> > h && john --wordlist=rockyou.txt h`; BitLocker → `bitlocker2john`; the password is often in the challenge text or another artifact |
+| **Timelines won't line up** | **normalize every source to UTC** (the usual culprit); pivot on a *different* shared IOC; widen the window to ±15 min; check the brief for noted clock skew |
+| **Answer rejected but you're sure** | it's the **format** ([§6](#6-answer-format-discipline--common-question-patterns)): wrong timezone, hash algorithm, case, path slashes, a trailing space/newline, or they want `CVE-…` / `T####` / defanged `hxxp` — try the other representation |
+| **Totally blank on a question** | re-read it — the wording usually names the artifact/tool; run the universal sweep below; then skip and return |
+
+**Universal last resorts (run these on literally anything):**
+```bash
+strings -n 6 <artifact> | grep -iE 'flag|nexsec26\{|password|http|BEGIN'   # cheap wins first
+binwalk -e <artifact>                 # embedded files
+bulk_extractor -o be_out <artifact>   # carves emails, URLs, IPs, card numbers, keys
+exiftool -a -G1 <artifact>            # metadata you skipped
+# then: CyberChef Magic on any blob · aperisolve on any image · searchsploit/trickest on any version
+```
 
 > **Workflow:** read the full question list first, pick the one artifact + tool each question needs, and answer only what's asked. Don't try to fully reverse the whole image — points are per-question.
