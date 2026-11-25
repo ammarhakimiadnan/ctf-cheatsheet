@@ -222,6 +222,62 @@ done
 
 ---
 
+## ▶ Game-Day Runbook — literal step-by-step (start here tomorrow)
+
+Tools are installed. A challenge drops. Do these in order, every time.
+
+**Step 0 — the night before (once):** run 0a–0g, then the 0i sanity loop until nothing says MISSING, and clone the CVE/PoC repos ([05 §1](05-cve-poc-forensics.md)) while you still have internet.
+
+**Step 1 — make a clean workspace and NEVER touch the original.**
+```bash
+mkdir -p ~/case/chal1/{evidence,out,notes} && cd ~/case/chal1
+cp /path/to/given/* evidence/           # copy the downloaded artifacts in
+chmod -R a-w evidence/                   # make originals read-only so you can't corrupt them
+sha256sum evidence/* | tee notes/hashes.txt   # record hashes (questions sometimes ask)
+```
+
+**Step 2 — read ALL the questions first.** Write them into `notes/questions.txt`. Next to each, note the **format** the answer must be (timestamp? SHA256? IP? path? CVE id?). You answer per-question — don't try to "solve" the whole image.
+
+**Step 3 — identify every artifact.**
+```bash
+file evidence/*          # what each one actually is
+exiftool evidence/*      # metadata / software / timestamps
+```
+Match each to a type using the [§1 triage table](#1-triage--the-first-5-minutes-on-any-artifact). **If `file` says a VM/image container (E01/VMDK/VDI/VHDX/QCOW2/OVA) or `mmls`/`vol` errors with "cannot determine format" → go to [§4.1](#41-containers-forensic-images--vm-files--get-to-a-mountable-form-first) FIRST** and convert/mount it, then come back.
+
+**Step 4 — open the matching branch and run its first commands.** One artifact = one branch:
+
+| It's a… | Jump to | Literal first 3 commands |
+| --- | --- | --- |
+| Memory dump | [§4a](#4a-windows-memory-dump) | `vol -f evidence/mem.raw windows.info` → `windows.pstree` → `windows.cmdline` |
+| Windows disk | [§4b](#4b-windows-disk-image-e01--vmdk--img) | `mmls` → mount `-o ro` → `log2timeline.py` |
+| pcap | [§4c](#4c-network-capture-pcap--pcapng) | `tshark -r f -q -z io,phs` → `--export-objects http,out/` → Follow Stream |
+| Event logs | [§4d](#4d-windows-event-logs-evtx) | `hayabusa csv-timeline -d evidence/ -o out/tl.csv` → sort it |
+| Linux disk | [§4e](#4e-linux-server-compromise-disk-image--triage-tarball) | mount `-o ro` → grep web logs → `.bash_history` |
+| Doc / PDF / email | [§4f](#4f-malicious-document--phishing-docx-doc-xlsm-pdf-eml) | `oleid`/`olevba` or `pdfid` → decode the payload URL |
+| Browser profile | [§4g](#4g-browser-artifacts-history--downloads--cache) | `hindsight -i <profile> -o out/browser` |
+| Mobile backup | [§4h](#4h-mobile-backup-android--ios) | `aleapp.py`/`ileapp.py -i evidence/ -o out/` |
+| Image/audio/archive/blob | [§2](#2-standalone-file--stego-analysis) | `file` → `binwalk -e` / `zsteg -a` / `exiftool` |
+
+**Step 5 — work the question list top-down**, pulling the answer from that branch's table. Write every finding into `notes/` as you go (IP, user, filename, hash, timestamp, command, CVE/MITRE).
+
+**Step 6 — more than one artifact? Build ONE timeline and correlate.** Pivot on a shared time + IOC → [§4i](#4i-correlate-across-artifacts-when-you-get-more-than-one).
+
+**Step 7 — "which vulnerability / CVE did they use?"** Match the payload signature, then look it up → [05-cve-poc-forensics.md](05-cve-poc-forensics.md).
+
+**Step 8 — submit each answer in the EXACT format** ([§6](#6-answer-format-discipline--common-question-patterns)). Re-check timezones on timestamps and algorithm on hashes before you hit submit.
+
+**Step 9 — stuck on a question?** Run this fallback, in order, before moving on:
+```bash
+strings -n 8 evidence/artifact | grep -iE 'flag|nexsec26\{|password|http'   # cheap wins
+binwalk -e evidence/artifact                                                 # hidden embedded files
+exiftool -a -G1 evidence/artifact                                            # overlooked metadata
+# then: throw any odd blob into CyberChef "Magic"; try a different tool for the same artifact
+```
+Still stuck after ~10 min → **skip it, bank the ones you can answer, come back.** Points are per-question.
+
+---
+
 ## 1. Triage — the first 5 minutes on any artifact
 
 **Always do this before picking a specialist tool.** It tells you *which* walkthrough in Section 4 to run.
