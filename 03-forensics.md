@@ -1,6 +1,6 @@
 # Forensics Cheatsheet
 
-DFIR for a CTF: you are usually **handed artifacts** (a memory dump, a disk image, a pcap, event logs, a suspicious document) and a **question list**, and scored on exact answers. This tab is built to get you from "here are the files" to "here is the answer" fast.
+**This is a standalone forensics event** — no live boxes to hack, no Linux/Windows privesc. You are **handed artifacts** (a memory dump, a disk image, a pcap, event logs, a suspicious document) and a **question list**, and scored on exact answers. This tab is built to get you from "here are the files" to "here is the answer" fast.
 
 Read it in this order on game day:
 1. **Section 0** — install everything tonight so nothing blocks you tomorrow.
@@ -184,7 +184,7 @@ for p in ~/tools/chainsaw/chainsaw ~/tools/hayabusa/hayabusa ~/tools/regripper/r
 done
 ```
 
-> Keep all cloned tools under `~/tools/` and add release-binary dirs to `PATH` in `~/.bashrc`, same as the boot2root tab. One folder, no hunting mid-challenge.
+> Keep all cloned tools under `~/tools/` and add release-binary dirs to `PATH` in `~/.bashrc`. One folder, no hunting mid-challenge.
 
 ---
 
@@ -216,9 +216,9 @@ If `file` says `data` and it's small, it's probably encoded/encrypted — `strin
 
 ---
 
-## 2. Live-Box & Standalone File Forensics
+## 2. Standalone File & Stego Analysis
 
-(Artifacts you find on a boot2root box, or small given files: images, archives, encoded blobs.)
+(Small given files: images, audio, archives, documents, or an encoded blob — the kind dropped straight into a forensics challenge.)
 
 **First move on any file — identify before anything else:**
 ```bash
@@ -715,18 +715,17 @@ Anchor on **time + one shared IOC** (an IP, a filename, a username) and walk it 
 
 ---
 
-## 5. Volatility Deep-Dive (dumping + analyzing live memory)
+## 5. Volatility Deep-Dive (memory analysis reference)
 
-Use this when you're on a **live boot2root box** and stuck on creds/persistence — dumping RAM is a heavier side-path, not the default route to root.
+Tomorrow you'll be **given** the memory image — go straight to **4a** and this section for the deep plugin reference. Keep **Step 1** only for the rare challenge that hands you a live VM/host to acquire the RAM from yourself.
 
-**Step 1 — get a memory image off the box**
+**Step 1 (only if you must acquire it yourself) — get a memory image off a system**
 ```bash
 # Linux (LiME):
 insmod lime.ko "path=/tmp/mem.lime format=lime"
 # Linux fallback (no tools): cp /proc/kcore /tmp/mem.raw   (big/slow)
-# Windows (winpmem/DumpIt uploaded):  winpmem.exe mem.raw
+# Windows (winpmem/DumpIt):  winpmem.exe mem.raw
 ```
-Transfer it back with the file-transfer steps in the Tools & Setup tab.
 
 **Step 2 — identify**
 ```bash
