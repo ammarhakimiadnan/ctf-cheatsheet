@@ -14,11 +14,37 @@ Read it in this order on game day:
 
 **The org's Pwnbox is Linux (Parrot/Ubuntu/Kali-style).** Every tool below is Linux-native or cross-platform; the handful that are classically Windows (the EZ tools, DeepBlueCLI) have Linux-native replacements mapped in **0h**. Each install line has a fallback: `apt` → `pipx`/`pip --break-system-packages` → `git clone` + run the script directly. If egress is blocked tomorrow, everything here must already be installed — **don't leave installs for game day.** The quickest safety net: run the one-shot block (0a), then 0b–0g, then verify with the loop in 0i.
 
+### 0·Python — pip is usually locked down on the Pwnbox
+
+`pip install` often fails (externally-managed-environment, or no direct PyPI), but **`python3` always works.** Use this ladder top-to-bottom until one sticks — and remember the last rung needs no install at all:
+
+```bash
+# 1. apt-packaged version first (no pip involved)
+sudo apt install -y python3-<tool>          # e.g. python3-oletools, python3-impacket
+
+# 2. pipx — installs each tool in its own env; get pipx from APT, not pip
+sudo apt install -y pipx && pipx ensurepath
+pipx install <tool>
+
+# 3. pip, forced past the "externally-managed" block
+python3 -m pip install <tool> --break-system-packages
+#    (pip module itself missing?  python3 -m ensurepip --upgrade  )
+
+# 4. isolated venv (never touches system python)
+python3 -m venv ~/venv && source ~/venv/bin/activate && python3 -m pip install <tool>
+
+# 5. run STRAIGHT FROM SOURCE — no install at all (most robust, always works)
+git clone https://github.com/<user>/<repo> ~/tools/<repo>
+python3 ~/tools/<repo>/<script>.py --help
+```
+
+> **Rule for the rest of this tab:** wherever you see `pipx install X` or `pip install X`, if it fails drop to rung 3 (`--break-system-packages`), then rung 5 (clone + `python3 script.py`). Volatility 3, oletools, analyzeMFT, regipy, hindsight, windowsprefetch all run fine straight from a git clone with `python3` — no packaging needed.
+
 ### 0a. One-shot apt base
 
 ```bash
 sudo apt update && sudo apt install -y \
-  python3-pip pipx git curl wget unzip p7zip-full \
+  python3-pip python3-venv pipx git curl wget unzip p7zip-full \
   sleuthkit autopsy ewf-tools libewf-dev \
   wireshark tshark tcpdump \
   binwalk foremost bulk-extractor scalpel \
@@ -37,8 +63,11 @@ pipx ensurepath
 # Volatility 3 — main tool
 pipx install volatility3          # gives the `vol` command
 vol --help | head                  # sanity check
-# (fallback install if pipx misbehaves)
-# pip3 install volatility3 --break-system-packages
+# fallbacks if pip/pipx are locked down (see the Python ladder above):
+#   python3 -m pip install volatility3 --break-system-packages
+#   git clone https://github.com/volatilityfoundation/volatility3 ~/tools/vol3
+#   python3 ~/tools/vol3/vol.py -f mem.raw windows.info      # runs straight from source
+# NOTE: every `vol ...` command in this tab also works as `python3 ~/tools/vol3/vol.py ...`
 
 # Symbol tables auto-download on first use; pre-warm internet-dependent fetch now.
 # For Linux memory dumps you may need a custom ISF symbol table (see 4a / 5).
