@@ -10,11 +10,45 @@ Read it in this order on game day:
 
 ---
 
+## Contents
+
+- [0. Toolkit Setup](#0-toolkit-setup-do-this-the-night-before)
+  - [0. Python — pip is locked down on the Pwnbox](#0-python--pip-is-usually-locked-down-on-the-pwnbox)
+  - [0a. One-shot apt base](#0a-one-shot-apt-base)
+  - [0b. Memory forensics — Volatility 3 + 2](#0b-memory-forensics--volatility-3-primary--volatility-2-legacy-fallback)
+  - [0c. Timeline — Plaso](#0c-timeline--plaso-log2timeline)
+  - [0d. Windows event logs (.evtx)](#0d-windows-event-logs-evtx)
+  - [0e. Windows registry + artifact parsers](#0e-windows-registry--artifact-parsers)
+  - [0f. Documents, mail, browsers](#0f-documents-mail-browsers)
+  - [0g. Stego / carving extras](#0g-stego--carving-extras)
+  - [0h. Runtimes & Windows-only-tool fallbacks](#0h-runtimes--windows-only-tool-fallbacks-youre-on-a-linux-pwnbox)
+  - [0i. Wordlists + final sanity check](#0i-wordlists--final-sanity-check)
+- [▶ Game-Day Runbook — literal step-by-step (START HERE)](#game-day-runbook--literal-step-by-step-start-here)
+- [1. Triage — the first 5 minutes](#1-triage--the-first-5-minutes-on-any-artifact)
+- [2. Standalone File & Stego Analysis](#2-standalone-file--stego-analysis)
+- [3. Artifact Analysis — tool map by type](#3-artifact-analysis--tool-map-by-type)
+- [4. Full Incident Walkthroughs](#4-full-incident-walkthroughs)
+  - [4.0 Master flow — any artifact](#40-master-flow--run-this-for-any-artifact-every-time)
+  - [4.1 Containers, forensic images & VM files](#41-containers-forensic-images--vm-files--get-to-a-mountable-form-first)
+  - [4a. Windows memory dump](#4a-windows-memory-dump-memraw--vmem--dmp)
+  - [4b. Windows disk image](#4b-windows-disk-image-e01--vmdk--img)
+  - [4c. Network capture (pcap)](#4c-network-capture-pcap--pcapng)
+  - [4d. Windows event logs (evtx)](#4d-windows-event-logs-evtx)
+  - [4e. Linux server compromise](#4e-linux-server-compromise-disk-image--triage-tarball)
+  - [4f. Malicious document / phishing](#4f-malicious-document--phishing-docx-doc-xlsm-pdf-eml)
+  - [4g. Browser artifacts](#4g-browser-artifacts-history--downloads--cache)
+  - [4h. Mobile backup (Android / iOS)](#4h-mobile-backup-android--ios)
+  - [4i. Correlate across artifacts](#4i-correlate-across-artifacts-when-you-get-more-than-one)
+- [5. Volatility Deep-Dive](#5-volatility-deep-dive-memory-analysis-reference)
+- [6. Answer-Format Discipline](#6-answer-format-discipline--common-question-patterns)
+
+---
+
 ## 0. Toolkit Setup (do this the night before)
 
 **The org's Pwnbox is Linux (Parrot/Ubuntu/Kali-style).** Every tool below is Linux-native or cross-platform; the handful that are classically Windows (the EZ tools, DeepBlueCLI) have Linux-native replacements mapped in **0h**. Each install line has a fallback: `apt` → `pipx`/`pip --break-system-packages` → `git clone` + run the script directly. If egress is blocked tomorrow, everything here must already be installed — **don't leave installs for game day.** The quickest safety net: run the one-shot block (0a), then 0b–0g, then verify with the loop in 0i.
 
-### 0·Python — pip is usually locked down on the Pwnbox
+### 0. Python — pip is usually locked down on the Pwnbox
 
 `pip install` often fails (externally-managed-environment, or no direct PyPI), but **`python3` always works.** Use this ladder top-to-bottom until one sticks — and remember the last rung needs no install at all:
 
@@ -222,7 +256,7 @@ done
 
 ---
 
-## ▶ Game-Day Runbook — literal step-by-step (start here tomorrow)
+## Game-Day Runbook — literal step-by-step (start here)
 
 Tools are installed. A challenge drops. Do these in order, every time.
 
@@ -249,7 +283,7 @@ Match each to a type using the [§1 triage table](#1-triage--the-first-5-minutes
 
 | It's a… | Jump to | Literal first 3 commands |
 | --- | --- | --- |
-| Memory dump | [§4a](#4a-windows-memory-dump) | `vol -f evidence/mem.raw windows.info` → `windows.pstree` → `windows.cmdline` |
+| Memory dump | [§4a](#4a-windows-memory-dump-memraw--vmem--dmp) | `vol -f evidence/mem.raw windows.info` → `windows.pstree` → `windows.cmdline` |
 | Windows disk | [§4b](#4b-windows-disk-image-e01--vmdk--img) | `mmls` → mount `-o ro` → `log2timeline.py` |
 | pcap | [§4c](#4c-network-capture-pcap--pcapng) | `tshark -r f -q -z io,phs` → `--export-objects http,out/` → Follow Stream |
 | Event logs | [§4d](#4d-windows-event-logs-evtx) | `hayabusa csv-timeline -d evidence/ -o out/tl.csv` → sort it |
